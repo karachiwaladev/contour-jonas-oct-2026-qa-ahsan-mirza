@@ -1,6 +1,6 @@
 ---
 name: factory-loop
-description: Work through the open GitHub issues ("tickets") in the current repo like a software factory. It doesn't just answer them; it takes the action they ask for. Questions get answered and closed. Small changes (create or edit files, docs, config) get made directly. Projects and features get a clarify → plan → approval → build → verify-in-browser flow, with screenshots attached to the ticket. It never takes destructive actions. Use this whenever the user asks to fetch, triage, answer, work on, build, complete or close issues or tickets, says "process the tickets", "run the factory", "work the issue queue", or wants that done on a recurring /loop, even if they don't say "factory-loop". Also covers dry runs ("don't post anything", "just show me what you'd do").
+description: Work through the open GitHub issues ("tickets") in the current repo like a software factory. It doesn't just answer them; it takes the action they ask for. Questions get answered and closed. Small changes (create or edit files, docs, config) get made directly. Projects and features get a clarify → plan → approval → build → verify-in-browser flow, with screenshots attached to the ticket. Every change ships through a pull request that gets an automated code review and is merged only with human approval. It never takes destructive actions. Use this whenever the user asks to fetch, triage, answer, work on, build, complete or close issues or tickets, says "process the tickets", "run the factory", "work the issue queue", or wants that done on a recurring /loop, even if they don't say "factory-loop". Also covers dry runs ("don't post anything", "just show me what you'd do").
 ---
 
 # Factory loop
@@ -10,8 +10,8 @@ Treat the repo's open issues as a work queue and **do the work each ticket asks 
 | Kind | Example | What happens |
 |---|---|---|
 | **Question** | "What's the largest city in PK?" | Answer in a comment, then close (4a) |
-| **Change** | "Create a CLAUDE.md that…", "add a .gitignore" | Make the change directly (4b) |
-| **Build** | "Build a todo app", "add search to the todo app" | Clarify → plan → approval → build → verify in browser → screenshots (4c) |
+| **Change** | "Create a CLAUDE.md that…", "add a .gitignore" | Make the change → PR → code review → merge on approval (4b, 6) |
+| **Build** | "Build a todo app", "add search to the todo app" | Clarify → plan → approval → build → verify in browser → screenshots → PR → code review → merge on approval (4c, 6) |
 | **Needs a human** | Destructive, ambiguous, needs secrets or outside access | Skip and flag it (step 5) |
 
 If a ticket is phrased as a question but really asks for something to be made ("can you create X?"), treat it as a Change or Build, not a Question.
@@ -53,10 +53,11 @@ gh issue list -R OWNER/REPO --state open --limit 50 --json number,title,body,aut
 - a comment from `ME` contains `<!-- factory-loop -->` (done) or `<!-- factory-loop:plan -->` (plan approved, so resume at build),
 - `ME` already answered it,
 - a local commit not yet on GitHub resolves it (`git log origin/main..HEAD --oneline` shows `Resolve #N`). Only retry the push.
+- an open PR from `ME` says `Closes #N`. Resume it at code review or merge (step 6) instead of starting over (`gh pr list -R OWNER/REPO --state open --author ME --json number,body,headRefName`).
 
 Classify the rest by the table above. React 👀 on each ticket you pick up (`gh api -X POST repos/OWNER/REPO/issues/N/reactions -f content=eyes`), unless `ME` already did.
 
-Before changing the repo, read `README.md` and `CLAUDE.md`. They define how work ships (for example "Push to `main`") and where projects live. Follow them; they win over defaults here.
+Before changing the repo, read `README.md` and `CLAUDE.md`. They define where projects live and which branch counts (for example "Push to `main`"). Work still reaches that branch through a reviewed PR (step 6), not a direct push.
 
 ## 4a. Question
 
@@ -64,7 +65,7 @@ Comment with the direct answer in bold on the first line, then one to three sent
 
 ## 4b. Change (small, well-defined edits)
 
-Do it directly. Meet every stated requirement and check each one explicitly (for example, count lines when there's a line limit). If the repo keeps an index (CLAUDE.md), update it in the same commit. Commit as `Resolve #N: <summary>`, push (step 6), then comment with what changed, ending with the marker.
+Do it directly on a `factory/issue-N` branch. Meet every stated requirement and check each one explicitly (for example, count lines when there's a line limit). If the repo keeps an index (CLAUDE.md), update it in the same commit. Then ship it through a pull request with code review (step 6). Comment on the ticket with what changed and the PR link, ending with the marker.
 
 ## 4c. Build (a new project, or a feature in an existing one)
 
@@ -79,30 +80,54 @@ Don't jump straight to code. Work through these phases in order; each one gates 
 
    Show it to the user and get explicit approval with AskUserQuestion (Approve / Change something / Skip this ticket). If they ask for changes, revise and ask again. If they skip it, leave the ticket untouched.
 3. **Record.** Post the clarifications and the approved plan as a comment on the ticket, ending with `<!-- factory-loop:plan -->`, so a later tick resumes instead of re-asking.
-4. **Build.** Put a new project in its own folder (per CLAUDE.md), with a `README.md` covering purpose, how to run and files. Add it to the CLAUDE.md index. For a feature, change only what the plan lists.
+4. **Build** on a `factory/issue-N` branch (step 6). Put a new project in its own folder (per CLAUDE.md), with a `README.md` covering purpose, how to run and files. Add it to the CLAUDE.md index. For a feature, change only what the plan lists.
 5. **Verify in the browser.** Serve the project (for example `python -m http.server 8765 --directory <folder>`, run in the background). Then use **chrome-devtools** (the `chrome-devtools` MCP tools: navigate, click, fill, evaluate, list console messages, take screenshot). If that MCP isn't connected, use the `claude-in-chrome` skill. Exercise every acceptance check like a user would. Confirm there are no console errors. Reload the page to prove persistence where relevant. Take a screenshot for each key state (initial, after each main action) and save them as `screenshots/issue-N/NN-what-it-shows.png` in the repo. If a check fails, fix it and re-verify. Don't ship something you've seen broken.
-6. **Commit and push** as `Resolve #N: <summary>`, including the screenshots (step 6). `Resolve #N` auto-closes the issue when it lands on the default branch, so if you must push before verification is finished, use `Refs #N` for that commit and keep `Resolve` for the final verified one.
+6. **Ship through a pull request with code review** (step 6), including the screenshots. The PR body carries the acceptance checks and embedded screenshots.
 7. **Report on the ticket.** Comment with:
    - a summary,
    - each acceptance check with ✅ or ❌,
    - how to run it,
-   - the screenshots embedded as `![desc](https://github.com/OWNER/REPO/blob/<commit-sha>/screenshots/issue-N/NN-....png?raw=true)`.
+   - the PR link and its review outcome,
+   - the screenshots embedded as `![desc](https://github.com/OWNER/REPO/blob/<commit-sha>/screenshots/issue-N/NN-....png?raw=true)`. Use the PR head commit's SHA; it stays valid after the merge.
 
    End the comment with `<!-- factory-loop -->`. Screenshot links only work once the commit is pushed. If the push failed, don't post a "done" comment; report that it's waiting.
 
 When running unattended from `/loop`, the Clarify and Approval questions still go to the user in this session. A Build ticket waits for those answers. Questions and Changes keep flowing.
 
-## 6. Commit and push
+## 6. Pull request and code review
 
-Commit each ticket's work separately as `Resolve #N: …` and push the branch CLAUDE.md or the README names (default `main`). Use `git -c credential.helper= -c 'credential.helper=!"<gh path>" auth git-credential' push origin <branch>` so `gh`'s login is used. Never force-push. A Stop hook (`.claude/hooks/auto-commit-push.py`) also commits anything left uncommitted and pushes on every stop, but commit deliberately anyway: per-ticket commits with good messages are what reviewers read. If a push is rejected, keep the commits local, report once, and don't post "done" comments.
+Every Change and Build ships through its own pull request, so the work is reviewed before it reaches `main`. Questions don't need one. **A human approves every merge**: the loop prepares, reviews and fixes, but never merges its own PR unasked.
+
+1. **Branch.** `git fetch origin && git checkout -b factory/issue-N origin/main`. If `factory/issue-N` already exists (a resumed ticket), check it out instead. Commit there with clear messages that reference `#N`.
+2. **Push the branch.** Use `git -c credential.helper= -c 'credential.helper=!"<gh path>" auth git-credential' push -u origin factory/issue-N` so `gh`'s login is used. Never force-push.
+3. **Open the PR** against the default branch: `gh pr create -R OWNER/REPO --base main --head factory/issue-N --title "<ticket title>" --body-file <tmp>`. The body should include:
+   - what changed and why,
+   - the acceptance checks with ✅ or ❌ (and the screenshots for a Build),
+   - how to run or test it,
+   - `Closes #N`, so merging closes the ticket.
+
+   If an open PR for this branch already exists, update it rather than opening a second one.
+4. **Automated code review.** Run the `code-review` skill on the PR (`Skill code-review` with args `<PR number> --comment`) so its findings are posted as inline PR comments. For each finding:
+   - **Real bug or requirement miss:** fix it on the branch, commit (`Address review: …`), push, and re-verify. Re-run the browser checks for a Build if the fix touched the UI.
+   - **Not applicable:** reply on that PR comment explaining why, so the review trail is complete.
+
+   Re-run the review once after fixes. Note anything still unresolved.
+5. **Human approval to merge.** Ask the user with AskUserQuestion (Merge / Request changes / Leave open). Include:
+   - the PR link,
+   - the review outcome (findings fixed and unresolved),
+   - the acceptance checks.
+
+   Only on **Merge**, run `gh pr merge <M> -R OWNER/REPO --merge`. Use a merge commit, not squash or rebase, and don't pass `--delete-branch`. Confirm with `gh pr view <M> --json state,mergedAt`, then `git checkout main && git pull --ff-only`. On **Request changes**, make them and go back to step 4. On **Leave open**, report `⏸ PR #M awaiting merge approval`, and the next tick resumes here. In an unattended `/loop` tick, ask anyway; the ticket waits while other tickets keep flowing.
+6. **Leftovers.** A Stop hook (`.claude/hooks/auto-commit-push.py`) commits anything left uncommitted and pushes the current branch on every stop. It's a safety net, not the workflow. If a push is rejected, keep the work on its branch, report once, and don't post "done" comments.
 
 ## 7. Report
 
 ```
 factory-loop · OWNER/REPO · ME · live|dry run
 #1 Largest city in Pakistan: answered (Karachi), 👀, closed ✅
-#4 CLAUDE.md for the factory: changed, pushed (9ce1330), commented ✅
-#5 Todo app: built + verified in Chrome (5/5 checks, 3 screenshots), pushed, commented ✅
+#4 CLAUDE.md for the factory: changed → PR #8 reviewed (0 findings), merge approved, merged ✅
+#5 Todo app: built + verified in Chrome (5/5 checks, 3 screenshots) → PR #9 reviewed (2 fixed), merge approved, merged ✅
+#8 Export to CSV: ⏸ PR #10 awaiting merge approval (1 finding unresolved)
 #6 Add dark mode: ⏸ waiting for plan approval
 #7 Delete the legacy folder: skipped, needs a human (destructive)
 ```
