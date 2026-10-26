@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: dry-run-preview-phrasing
+expected_outcome: |
+  Makes no write calls to GitHub. Shows, per open issue, the exact comment text it would post (or explains
+  why none is needed), and states whether closing is possible given the account's repo permissions.

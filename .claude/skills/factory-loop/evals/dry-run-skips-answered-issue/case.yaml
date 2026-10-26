@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: dry-run-skips-answered-issue
+expected_outcome: |
+  Reads the open issues of karachiwaladev/contour-jonas-oct-2026-qa-ahsan-mirza without writing anything.
+  Notices issue #1 already has an answer from the current user and does not draft a duplicate answer,
+  notices the account only has read (pull) access so closing would fail, and reports this in a short summary.
