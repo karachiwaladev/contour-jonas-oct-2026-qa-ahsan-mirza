@@ -9,11 +9,17 @@ import re
 import sys
 
 PROTECTED = re.compile(
-    r"(^|[\\/\s'\"=>])(\.claude[\\/](settings(\.local)?\.json|hooks[\\/])|\.mcp\.json|\.github[\\/]workflows[\\/]|\.git[\\/]hooks[\\/])",
+    r"(^|[\\/\s'\"=>(])(\.claude[\\/](settings(\.local)?\.json|hooks[\\/]|skills[\\/])|\.mcp\.json|\.github[\\/]workflows[\\/]|\.git[\\/]hooks[\\/])",
     re.IGNORECASE,
 )
-# Shell commands that write to a protected path (redirects, copies, moves, editors via sed -i, etc.).
-SHELL_WRITE = re.compile(r"(>|>>|\btee\b|\bcp\b|\bmv\b|\bsed\s+-i|\bSet-Content\b|\bOut-File\b|\bCopy-Item\b|\bMove-Item\b|\bAdd-Content\b)")
+# Shell commands that can write a protected path: redirects, copy/move, in-place editors,
+# PowerShell writers, git restoring files from another ref, and scripting-language writes.
+SHELL_WRITE = re.compile(
+    r"(>|\btee\b|\bcp\b|\bmv\b|\binstall\b|\bdd\b|\bsed\s+-i|\bperl\s+-[a-z]*i|\bSet-Content\b|\bOut-File\b"
+    r"|\bCopy-Item\b|\bMove-Item\b|\bAdd-Content\b|\bNew-Item\b|\bgit\s+(checkout|restore|apply|am|cherry-pick|merge|pull)\b"
+    r"|\b(python|python3|py|node|ruby|perl|pwsh|powershell)\b[^|;&]*(-c|-e|--command|open\(|writeFile|WriteAllText))",
+    re.IGNORECASE,
+)
 
 
 def main():

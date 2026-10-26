@@ -1,4 +1,7 @@
-"""Stop hook: append this session's new user prompts to .claude/logs/prompts.jsonl.
+"""Append this session's new user prompts to .claude/logs/prompts.jsonl (one JSON object per line).
+
+Called by the auto-commit-push.py Stop hook before it commits, so the log is written first and
+committed in the same step. It can still be run on its own as a hook (reads the payload on stdin).
 
 Reads the hook payload (session_id, transcript_path) from stdin, scans the
 transcript for real user prompts, and appends any whose uuid isn't logged yet.
@@ -29,11 +32,29 @@ def prompt_text(entry):
     return content
 
 
+def validate():
+    """Line numbers in the log that aren't a single valid JSON object (empty list = all good)."""
+    bad = []
+    if LOG.exists():
+        with LOG.open(encoding="utf-8") as f:
+            for i, line in enumerate(f, 1):
+                try:
+                    if not isinstance(json.loads(line), dict):
+                        bad.append(i)
+                except ValueError:
+                    bad.append(i)
+    return bad
+
+
 def main():
-    payload = json.load(sys.stdin)
+    log(json.load(sys.stdin))
+
+
+def log(payload):
+    """Append this session's new prompts to LOG. Returns how many were added."""
     transcript = payload.get("transcript_path")
     if not transcript or not os.path.exists(transcript):
-        return
+        return 0
 
     seen = set()
     if LOG.exists():
@@ -68,9 +89,11 @@ def main():
 
     if new:
         LOG.parent.mkdir(parents=True, exist_ok=True)
-        with LOG.open("a", encoding="utf-8") as f:
-            for r in new:
-                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        # One JSON object per line; write the whole batch in a single call so a crash
+        # can't leave a half-written line behind.
+        with LOG.open("a", encoding="utf-8", newline="\n") as f:
+            f.write("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in new))
+    return len(new)
 
 
 if __name__ == "__main__":

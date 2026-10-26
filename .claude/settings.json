@@ -32,11 +32,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/log-prompts.py\" 2>/dev/null || true",
-            "timeout": 30
-          },
-          {
-            "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-commit-push.py\" 2>/dev/null || true",
             "timeout": 120
           }

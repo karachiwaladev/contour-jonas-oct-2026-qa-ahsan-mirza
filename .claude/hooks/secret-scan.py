@@ -1,9 +1,13 @@
-"""PreToolUse hook (Bash|PowerShell): block commits and pushes that contain secrets.
+"""Secret scanning for the factory, used two ways:
 
-On `git commit` it scans the staged diff; on `git push` it scans the commits that
-aren't on the remote yet. Only added lines are checked, so removing a secret is
-never blocked. A match denies the command with the file, line and kind of secret
-(the value itself is never echoed back).
+1. PreToolUse hook (Bash|PowerShell): before a `git commit` or `git push` the agent runs,
+   scan what it would record or publish and deny the command if it contains secrets.
+2. Library: auto-commit-push.py imports scan_staged()/scan_outgoing() so the Stop hook's
+   own commit and push are scanned too.
+
+Only added lines are checked and deleted files are ignored, so removing a secret is never
+blocked. Findings name the file, line and kind of secret, never the value. All git output is
+decoded as UTF-8 so a non-ASCII diff can't crash the scan and let a commit through unscanned.
 """
 import json
 import os
@@ -13,7 +17,6 @@ import sys
 
 ROOT = os.environ.get("CLAUDE_PROJECT_DIR", ".")
 
-# (name, pattern). Kept specific to avoid noise on ordinary code.
 SECRET_PATTERNS = [
     ("AWS access key", r"\b(AKIA|ASIA)[0-9A-Z]{16}\b"),
     ("GitHub token", r"\b(gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b"),
@@ -29,34 +32,27 @@ SECRET_PATTERNS = [
 ]
 SECRET_FILES = re.compile(r"(^|/)(\.env(\..+)?|id_rsa|id_ed25519|.*\.pem|.*\.p12|.*\.pfx|credentials\.json)$")
 ALLOW_FILES = re.compile(r"(^|/)\.env\.example$")
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 def git(*args):
-    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True).stdout
+    r = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace")
+    return r.stdout
 
 
-def outgoing_diff():
-    """Diff of commits that would be pushed: everything not on any remote branch."""
-    revs = git("rev-list", "HEAD", "--not", "--remotes").split()
-    if not revs:
-        return "", []
-    files = git("diff", "--name-only", f"{revs[-1]}^", "HEAD").split() if len(revs) else []
-    return git("diff", f"{revs[-1]}^", "HEAD", "--unified=0"), files
-
-
-def scan(diff, files):
-    findings, current = [], None
-    for f in files:
-        if SECRET_FILES.search(f) and not ALLOW_FILES.search(f):
-            findings.append(f"{f}: secret-type file")
-    line_no = 0
+def scan_diff(diff):
+    """Scan unified-diff text (git diff / git log -p) for secrets on added lines."""
+    findings, current, in_header, line_no = [], None, False, 0
     for line in diff.splitlines():
-        if line.startswith("+++ "):
-            current = line[6:] if line.startswith("+++ b/") else None
+        if line.startswith("diff --git "):
+            in_header, current = True, None
+        elif in_header and line.startswith("+++ "):
+            current = line[6:] if line.startswith("+++ b/") else None  # /dev/null = deleted
         elif line.startswith("@@"):
+            in_header = False
             m = re.search(r"\+(\d+)", line)
             line_no = int(m.group(1)) - 1 if m else 0
-        elif line.startswith("+") and current:
+        elif not in_header and line.startswith("+") and current:
             line_no += 1
             for name, pat in SECRET_PATTERNS:
                 if re.search(pat, line):
@@ -65,19 +61,77 @@ def scan(diff, files):
     return findings
 
 
+def scan_names(names):
+    return [f"{n}: secret-type file" for n in names if SECRET_FILES.search(n) and not ALLOW_FILES.search(n)]
+
+
+def scan_staged():
+    """What the next commit would record (added/modified/renamed files only)."""
+    return (scan_names(git("diff", "--cached", "--name-only", "--diff-filter=ACMR").split())
+            + scan_diff(git("diff", "--cached", "--unified=0")))
+
+
+def scan_worktree(include_untracked):
+    """Tracked changes not yet staged, plus untracked files if they're about to be added."""
+    findings = (scan_names(git("diff", "--name-only", "--diff-filter=ACMR").split())
+                + scan_diff(git("diff", "--unified=0")))
+    if include_untracked:
+        for name in git("ls-files", "--others", "--exclude-standard").splitlines():
+            findings += scan_names([name])
+            path = os.path.join(ROOT, name)
+            try:
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    text = f.read(2_000_000)
+            except OSError:
+                continue
+            findings += scan_diff(f"diff --git a/{name} b/{name}\n+++ b/{name}\n@@ -0,0 +1 @@\n"
+                                  + "".join("+" + l + "\n" for l in text.splitlines()))
+    return findings
+
+
+def scan_outgoing(ref="HEAD"):
+    """Every commit reachable from `ref` that no remote branch has yet (root commits included)."""
+    if not git("rev-list", ref, "--not", "--remotes").strip():
+        return []
+    log = git("log", "-p", "--unified=0", "--format=", "--first-parent", "-m", "--diff-filter=ACMR",
+              ref, "--not", "--remotes")
+    names = git("log", "--name-only", "--format=", "--diff-filter=ACMR", ref, "--not", "--remotes").split()
+    return scan_names(sorted(set(names))) + scan_diff(log)
+
+
+def _strip_quotes(cmd):
+    return re.sub(r"\"[^\"]*\"|'[^']*'", "''", cmd)
+
+
+def _push_ref(cmd):
+    """Best-effort: the local ref a `git push [remote] [ref]` would publish."""
+    args = [a for a in _strip_quotes(cmd).split() if not a.startswith("-")]
+    try:
+        i = args.index("push")
+    except ValueError:
+        return "HEAD"
+    rest = args[i + 1:]
+    if len(rest) >= 2:
+        src = rest[1].split(":")[0].lstrip("+")
+        if src and git("rev-parse", "--verify", "--quiet", src).strip():
+            return src
+    return "HEAD"
+
+
 def main():
     command = (json.load(sys.stdin).get("tool_input") or {}).get("command", "")
-    if re.search(r"\bgit\b[^|;&]*\bcommit\b", command):
-        diff = git("diff", "--cached", "--unified=0")
-        files = git("diff", "--cached", "--name-only").split()
-        if " -a" in command or "--all" in command:  # commit -a stages tracked changes too
-            diff += git("diff", "--unified=0")
-            files += git("diff", "--name-only").split()
-    elif re.search(r"\bgit\b[^|;&]*\bpush\b", command):
-        diff, files = outgoing_diff()
-    else:
-        return
-    findings = scan(diff, files)
+    bare = _strip_quotes(command)
+    findings = []
+    if re.search(r"\bgit\b[^|;&]*\bcommit\b", bare):
+        findings += scan_staged()
+        commit_all = re.search(r"\bcommit\b[^|;&]*(\s-[A-Za-z]*a[A-Za-z]*\b|\s--all\b)", bare)
+        adds_first = re.search(r"\bgit\s+add\b", bare)  # e.g. `git add -A && git commit`
+        pathspec = re.search(r"\bcommit\b(?:\s+-\S+)*\s+[^-\s]", bare)  # `git commit file -m x`
+        if commit_all or adds_first or pathspec:
+            findings += scan_worktree(include_untracked=bool(adds_first))
+    if re.search(r"\bgit\b[^|;&]*\bpush\b", bare):
+        findings += scan_outgoing(_push_ref(command))
+    findings = sorted(set(findings))
     if findings:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",

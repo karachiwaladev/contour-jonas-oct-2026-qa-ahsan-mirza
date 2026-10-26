@@ -1,7 +1,8 @@
 """Static security scan for client-side web projects (HTML/JS/CSS).
 
 Usage:  python scan_web.py <folder> [--json]
-Prints findings ranked by severity; exit code 1 if any HIGH finding exists, else 0.
+Prints findings ranked by severity. Exit code: 1 if any HIGH finding exists, 2 if nothing
+could be scanned (bad path, no web files: fails closed), else 0.
 It's a fast first pass for the factory-security review, not a replacement for reading the code.
 """
 import json
@@ -13,7 +14,7 @@ SEVERITY_ORDER = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
 # (id, severity, file glob suffixes, regex, message)
 JS_RULES = [
-    ("xss-innerhtml", "HIGH", r"\.(innerHTML|outerHTML)\s*\+?=(?!\s*['\"`]\s*['\"`]?\s*;)",
+    ("xss-innerhtml", "HIGH", r"\.(innerHTML|outerHTML)\s*\+?=(?!=)(?!\s*(['\"`])\2\s*;)",
      "Assigning to innerHTML/outerHTML: XSS if any part is user data. Use textContent or build DOM nodes."),
     ("xss-insertadjacent", "HIGH", r"\binsertAdjacentHTML\s*\(", "insertAdjacentHTML parses HTML: XSS risk with user data."),
     ("xss-document-write", "HIGH", r"\bdocument\.write(ln)?\s*\(", "document.write can inject markup; avoid it."),
@@ -53,7 +54,13 @@ def scan(folder):
         if suffix not in (".js", ".mjs", ".html", ".htm"):
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        lines = text.splitlines()
+        # Blank out comments (keeping line breaks so line numbers stay right) so commented-out
+        # code doesn't raise findings. Line comments only count at the start of a line, so
+        # URLs like https://… aren't mistaken for comments.
+        def blank(m):
+            return re.sub(r"[^\n]", " ", m.group(0))
+        code = re.sub(r"/\*.*?\*/|<!--.*?-->", blank, text, flags=re.S)
+        lines = code.splitlines()
         rules = JS_RULES + (HTML_RULES if suffix in (".html", ".htm") else [])
         for i, line in enumerate(lines, 1):
             if line.strip().startswith("//"):
@@ -74,15 +81,24 @@ def scan(folder):
 
 
 def main():
-    if len(sys.argv) < 2:
+    targets = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if len(targets) != 1:
         print(__doc__)
         sys.exit(2)
-    findings = scan(sys.argv[1])
+    folder = targets[0]
+    # Fail closed: a typo'd or missing path must never read as "0 findings, pass".
+    if not Path(folder).is_dir():
+        print(f"factory-security: {folder!r} is not a directory. Nothing scanned (failing closed).")
+        sys.exit(2)
+    findings = scan(folder)
+    if not any(Path(folder).rglob("*.js")) and not any(Path(folder).rglob("*.htm*")):
+        print(f"factory-security: no .js/.html files under {folder!r}. Nothing scanned (failing closed).")
+        sys.exit(2)
     if "--json" in sys.argv:
         print(json.dumps(findings, indent=1))
     else:
         counts = {s: sum(f["severity"] == s for f in findings) for s in SEVERITY_ORDER}
-        print(f"factory-security scan of {sys.argv[1]}: {counts['HIGH']} high, {counts['MEDIUM']} medium, {counts['LOW']} low")
+        print(f"factory-security scan of {folder}: {counts['HIGH']} high, {counts['MEDIUM']} medium, {counts['LOW']} low")
         for f in findings:
             print(f"  [{f['severity']}] {f['file']}:{f['line']} {f['id']}: {f['message']}")
     sys.exit(1 if any(f["severity"] == "HIGH" for f in findings) else 0)
