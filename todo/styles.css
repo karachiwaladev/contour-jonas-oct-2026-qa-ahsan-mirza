@@ -37,9 +37,14 @@ body {
 
 h1 { margin: 0 0 16px; font-size: 1.75rem; }
 
-.new-task { display: flex; gap: 8px; }
+.new-task { display: flex; flex-direction: column; gap: 8px; }
 
-.new-task input {
+.new-task-extras { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+
+.field { display: flex; flex-direction: column; gap: 2px; font-size: 0.85rem; color: var(--muted); }
+.field.grow { flex: 1; min-width: 160px; }
+
+.new-task input, .filters select {
   flex: 1;
   padding: 10px 12px;
   border: 1px solid var(--border);
@@ -61,6 +66,26 @@ button {
 
 button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+.filters {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.status-filter { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+
+.status-filter button {
+  padding: 6px 14px;
+  border-radius: 0;
+  background: var(--card);
+  color: var(--text);
+}
+
+.status-filter button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+
 .task-list { list-style: none; margin: 16px 0 0; padding: 0; }
 
 .task {
@@ -76,9 +101,25 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
 .task input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
 
-.task label { flex: 1; overflow-wrap: anywhere; cursor: pointer; }
+.task-body { flex: 1; min-width: 0; }
+
+.task label { overflow-wrap: anywhere; cursor: pointer; }
 
 .task.done label { color: var(--muted); text-decoration: line-through; }
+
+.task-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; font-size: 0.8rem; }
+
+.due { color: var(--muted); }
+
+.task.overdue { border-color: var(--danger); }
+.task.overdue .due { color: var(--danger); font-weight: 600; }
+
+.tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
 
 .task .delete {
   padding: 6px 10px;

@@ -8,6 +8,9 @@ a client-side database, so they persist across page reloads with no server. Buil
 - **Create** a task: type a title and press Enter or click **Add**.
 - **Mark done**: tick the checkbox. Done tasks are struck through and move below open ones.
 - **Delete**: click **Delete** on a task.
+- **Due date** (optional): pick a date when adding a task. Open tasks past their due date show **Overdue** in red. Tasks sort by due date, with undated tasks last.
+- **Tags** (optional): type comma-separated tags when adding a task (`work, urgent`). They're trimmed, lowercased and shown as chips.
+- **Filters**: **All / Active / Completed** buttons, plus a tag dropdown built from the tags in use. The two combine.
 
 ## Run it
 
