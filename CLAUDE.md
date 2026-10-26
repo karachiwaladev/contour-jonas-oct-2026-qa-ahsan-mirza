@@ -44,6 +44,7 @@ renames or removes a project.
 | Project | Folder | Ticket | Status | Summary |
 |---|---|---|---|---|
 | Factory base | `/` (this file) | #4 | active | Factory rules, progressive disclosure, index |
+| Todo app | [`todo/`](todo/README.md) | #5 | active | Create, complete and delete tasks; IndexedDB storage |
 
 ### Tooling
 
