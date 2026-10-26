@@ -81,7 +81,7 @@ Don't jump straight to code. Work through these phases in order; each one gates 
 3. **Record.** Post the clarifications and the approved plan as a comment on the ticket, ending with `<!-- factory-loop:plan -->`, so a later tick resumes instead of re-asking.
 4. **Build.** Put a new project in its own folder (per CLAUDE.md), with a `README.md` covering purpose, how to run and files. Add it to the CLAUDE.md index. For a feature, change only what the plan lists.
 5. **Verify in the browser.** Serve the project (for example `python -m http.server 8765 --directory <folder>`, run in the background). Then use **chrome-devtools** (the `chrome-devtools` MCP tools: navigate, click, fill, evaluate, list console messages, take screenshot). If that MCP isn't connected, use the `claude-in-chrome` skill. Exercise every acceptance check like a user would. Confirm there are no console errors. Reload the page to prove persistence where relevant. Take a screenshot for each key state (initial, after each main action) and save them as `screenshots/issue-N/NN-what-it-shows.png` in the repo. If a check fails, fix it and re-verify. Don't ship something you've seen broken.
-6. **Commit and push** as `Resolve #N: <summary>`, including the screenshots (step 6).
+6. **Commit and push** as `Resolve #N: <summary>`, including the screenshots (step 6). `Resolve #N` auto-closes the issue when it lands on the default branch, so if you must push before verification is finished, use `Refs #N` for that commit and keep `Resolve` for the final verified one.
 7. **Report on the ticket.** Comment with:
    - a summary,
    - each acceptance check with ✅ or ❌,
