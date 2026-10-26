@@ -23,40 +23,57 @@ function parseTags(text) {
   return [...new Set(tags)];
 }
 
-// Today's date as YYYY-MM-DD in local time, comparable with <input type="date"> values.
+const toIso = (y, m, d) => [y, m, d].map((n) => String(n).padStart(2, "0")).join("-");
+const parseIso = (iso) => iso.split("-").map(Number); // -> [y, m, d], m is 1-based
+const daysInMonth = (y, m) => new Date(y, m, 0).getDate(); // m is 1-based
+const DAY_MS = 86400000;
+
+// Today's date as YYYY-MM-DD in local time, comparable with <input type="date"> values
+// (the date inputs are limited to 4-digit years, so string order is date order).
 function today() {
   const d = new Date();
-  return [d.getFullYear(), d.getMonth() + 1, d.getDate()].map((n) => String(n).padStart(2, "0")).join("-");
+  return toIso(d.getFullYear(), d.getMonth() + 1, d.getDate());
 }
 
 const REPEAT_LABELS = { daily: "Daily", weekly: "Weekly", monthly: "Monthly" };
 
-const toIso = (y, m, d) => [y, m, d].map((n) => String(n).padStart(2, "0")).join("-");
-const daysInMonth = (y, m) => new Date(y, m, 0).getDate(); // m is 1-based
-
 // One step of a series. Monthly keeps the series' original day-of-month (anchorDay),
 // clamped to short months, so Jan 31 -> Feb 28 -> Mar 31 rather than drifting to the 28th.
-function stepDate(iso, repeat, anchorDay) {
-  let [y, m, d] = iso.split("-").map(Number);
+function stepDate(iso, repeat, anchorDay, steps = 1) {
+  let [y, m, d] = parseIso(iso);
   if (repeat === "monthly") {
-    m += 1;
-    if (m > 12) { m = 1; y += 1; }
+    const total = (m - 1) + steps;
+    y += Math.floor(total / 12);
+    m = (total % 12) + 1;
     return toIso(y, m, Math.min(anchorDay || d, daysInMonth(y, m)));
   }
-  const next = new Date(y, m - 1, d + (repeat === "weekly" ? 7 : 1));
+  const next = new Date(y, m - 1, d + (repeat === "weekly" ? 7 : 1) * steps);
   return toIso(next.getFullYear(), next.getMonth() + 1, next.getDate());
 }
 
-// Next due date after `iso`, advanced until it's today or later so a late completion
-// doesn't leave a trail of already-overdue occurrences.
+// Next due date after `iso`, jumped forward to today or later so a late completion
+// doesn't leave a trail of already-overdue occurrences. Computed in one step rather
+// than a loop, so any due date (however old) finishes instantly.
 function nextDueDate(iso, repeat, anchorDay) {
-  let next = stepDate(iso, repeat, anchorDay);
-  while (next < today()) next = stepDate(next, repeat, anchorDay);
-  return next;
+  const next = stepDate(iso, repeat, anchorDay);
+  const t = today();
+  if (next >= t) return next;
+  const [ny, nm, nd] = parseIso(next);
+  const [ty, tm, td] = parseIso(t);
+  let behind; // whole steps needed to reach today, possibly one short
+  if (repeat === "monthly") {
+    behind = (ty - ny) * 12 + (tm - nm);
+  } else {
+    const days = Math.round((new Date(ty, tm - 1, td) - new Date(ny, nm - 1, nd)) / DAY_MS);
+    behind = Math.floor(days / (repeat === "weekly" ? 7 : 1));
+  }
+  let caught = stepDate(next, repeat, anchorDay, behind);
+  if (caught < t) caught = stepDate(caught, repeat, anchorDay);
+  return caught;
 }
 
 function formatDue(iso) {
-  const [y, m, d] = iso.split("-").map(Number);
+  const [y, m, d] = parseIso(iso);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
@@ -100,7 +117,10 @@ function renderTask(task) {
   body.append(label);
 
   const tags = task.tags || [];
-  if (task.dueDate || tags.length || task.repeat) {
+  // The ↻ badge marks a live series, so only open tasks show it; completed occurrences
+  // are history and shouldn't suggest they still recur.
+  const showRepeat = task.repeat && !task.done;
+  if (task.dueDate || tags.length || showRepeat) {
     const meta = document.createElement("div");
     meta.className = "task-meta";
     if (task.dueDate) {
@@ -109,7 +129,7 @@ function renderTask(task) {
       due.textContent = (isOverdue(task) ? "Overdue · " : "Due ") + formatDue(task.dueDate);
       meta.append(due);
     }
-    if (task.repeat) {
+    if (showRepeat) {
       const rep = document.createElement("span");
       rep.className = "repeat";
       rep.textContent = "↻ " + REPEAT_LABELS[task.repeat];
@@ -170,7 +190,10 @@ form.addEventListener("submit", async (e) => {
   if (!title) return;
   const repeat = repeatInput.value || null;
   // A recurring task needs a date to recur from; default the first occurrence to today.
-  const dueDate = dueInput.value || (repeat ? today() : null);
+  // Ignore anything that isn't a plain 4-digit-year date (the input is limited to those).
+  const typedDue = /^\d{4}-\d{2}-\d{2}$/.test(dueInput.value) ? dueInput.value : "";
+  const dueDate = typedDue || (repeat ? today() : null);
+  const typed = { title: titleInput.value, due: dueInput.value, tags: tagsInput.value, repeat: repeatInput.value };
   const task = { title, dueDate, tags: parseTags(tagsInput.value), repeat };
   if (repeat === "monthly") task.anchorDay = Number(dueDate.slice(8, 10));
   // Clear the form before the async save so input typed meanwhile isn't wiped afterwards.
@@ -180,7 +203,11 @@ form.addEventListener("submit", async (e) => {
     status.textContent = "";
     await refresh();
   } catch (err) {
-    titleInput.value = task.title; // give the user their text back
+    // Give the user back everything they entered, not just the title.
+    titleInput.value = typed.title;
+    dueInput.value = typed.due;
+    tagsInput.value = typed.tags;
+    repeatInput.value = typed.repeat;
     showError(err);
   }
   titleInput.focus();
@@ -203,23 +230,15 @@ list.addEventListener("change", async (e) => {
   if (e.target.type !== "checkbox") return;
   const id = Number(e.target.closest(".task").dataset.id);
   try {
-    const task = await TaskDB.get(id);
-    if (!task) return refresh();
-    task.done = e.target.checked;
-    // Completing a recurring task spawns the next occurrence, once. spawnedNext stays set
-    // if the task is un-checked, so toggling it again can't create duplicates.
-    const spawn = task.done && task.repeat && !task.spawnedNext;
-    if (spawn) task.spawnedNext = true;
-    await TaskDB.put(task);
-    if (spawn) {
-      await TaskDB.add({
-        title: task.title,
-        tags: task.tags || [],
-        repeat: task.repeat,
-        anchorDay: task.anchorDay,
-        dueDate: nextDueDate(task.dueDate || today(), task.repeat, task.anchorDay),
-      });
-    }
+    // Completing a recurring task spawns its next occurrence; un-completing removes it again.
+    // TaskDB.setDone does both in one transaction (see db.js).
+    await TaskDB.setDone(id, e.target.checked, (task) => ({
+      title: task.title,
+      tags: task.tags || [],
+      repeat: task.repeat,
+      ...(task.anchorDay ? { anchorDay: task.anchorDay } : {}),
+      dueDate: nextDueDate(task.dueDate || today(), task.repeat, task.anchorDay),
+    }));
     await refresh();
   } catch (err) {
     showError(err);

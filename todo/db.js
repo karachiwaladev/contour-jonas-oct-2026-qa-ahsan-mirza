@@ -3,7 +3,7 @@
 //              dueDate: "YYYY-MM-DD" | null, tags: string[],
 //              repeat: "daily" | "weekly" | "monthly" | null,
 //              anchorDay?: number,      // monthly: day-of-month the series started on
-//              spawnedNext?: boolean }  // recurring: next occurrence already created
+//              spawnedId?: number }     // recurring: id of the next occurrence it created
 // Tasks saved before a field existed simply lack it; the UI treats missing as empty.
 const TaskDB = (() => {
   const DB_NAME = "todo-app";
@@ -45,5 +45,47 @@ const TaskDB = (() => {
     get: (id) => run("readonly", (s) => s.get(id)),
     put: (task) => run("readwrite", (s) => s.put(task)),
     remove: (id) => run("readwrite", (s) => s.delete(id)),
+    setDone,
   };
+
+  // Mark a task done/not done in ONE readwrite transaction, so the read-modify-write can't
+  // interleave with another click and a half-finished change can't be left behind.
+  // - Completing a recurring task that hasn't spawned yet creates its next occurrence
+  //   (built by nextFor(task)) and records its id in spawnedId.
+  // - Un-completing it removes that next occurrence again if it's still open, so undoing an
+  //   accidental tick doesn't leave two active copies of the series.
+  async function setDone(id, done, nextFor) {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      const store = tx.objectStore(STORE);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+
+      store.get(id).onsuccess = (e) => {
+        const task = e.target.result;
+        if (!task || task.done === done) return; // already in that state (e.g. a double click)
+        task.done = done;
+
+        if (done && task.repeat && task.spawnedId == null) {
+          store.add({ ...nextFor(task), done: false, createdAt: Date.now() }).onsuccess = (ev) => {
+            task.spawnedId = ev.target.result;
+            store.put(task);
+          };
+        } else if (!done && task.spawnedId != null) {
+          store.get(task.spawnedId).onsuccess = (ev) => {
+            const next = ev.target.result;
+            if (next && !next.done) {
+              store.delete(task.spawnedId);
+              delete task.spawnedId;
+            } // if the next one was already completed, keep the link so we never re-spawn
+            store.put(task);
+          };
+        } else {
+          store.put(task);
+        }
+      };
+    });
+  }
 })();
