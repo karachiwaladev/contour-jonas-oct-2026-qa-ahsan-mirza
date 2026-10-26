@@ -152,7 +152,7 @@ function renderTask(task) {
 
   const actions = document.createElement("div");
   actions.className = "task-actions";
-  if (task.repeat && !task.done) {
+  if (showRepeat) {
     const stop = document.createElement("button");
     stop.type = "button";
     stop.className = "stop-repeat";
@@ -190,9 +190,8 @@ form.addEventListener("submit", async (e) => {
   if (!title) return;
   const repeat = repeatInput.value || null;
   // A recurring task needs a date to recur from; default the first occurrence to today.
-  // Ignore anything that isn't a plain 4-digit-year date (the input is limited to those).
-  const typedDue = /^\d{4}-\d{2}-\d{2}$/.test(dueInput.value) ? dueInput.value : "";
-  const dueDate = typedDue || (repeat ? today() : null);
+  // (The date input's min/max make the browser block out-of-range dates before submit.)
+  const dueDate = dueInput.value || (repeat ? today() : null);
   const typed = { title: titleInput.value, due: dueInput.value, tags: tagsInput.value, repeat: repeatInput.value };
   const task = { title, dueDate, tags: parseTags(tagsInput.value), repeat };
   if (repeat === "monthly") task.anchorDay = Number(dueDate.slice(8, 10));
@@ -203,11 +202,12 @@ form.addEventListener("submit", async (e) => {
     status.textContent = "";
     await refresh();
   } catch (err) {
-    // Give the user back everything they entered, not just the title.
-    titleInput.value = typed.title;
-    dueInput.value = typed.due;
-    tagsInput.value = typed.tags;
-    repeatInput.value = typed.repeat;
+    // Give the user back what they entered, but never overwrite a field they've
+    // already started filling in again since the form was cleared.
+    if (!titleInput.value) titleInput.value = typed.title;
+    if (!dueInput.value) dueInput.value = typed.due;
+    if (!tagsInput.value) tagsInput.value = typed.tags;
+    if (!repeatInput.value) repeatInput.value = typed.repeat;
     showError(err);
   }
   titleInput.focus();
@@ -242,6 +242,7 @@ list.addEventListener("change", async (e) => {
     await refresh();
   } catch (err) {
     showError(err);
+    refresh().catch(showError); // re-sync the checkbox with what was actually saved
   }
 });
 
@@ -251,18 +252,12 @@ list.addEventListener("click", async (e) => {
   if (!isDelete && !isStop) return;
   const id = Number(e.target.closest(".task").dataset.id);
   try {
-    if (isDelete) {
-      await TaskDB.remove(id);
-    } else {
-      const task = await TaskDB.get(id);
-      if (task) {
-        task.repeat = null;
-        await TaskDB.put(task);
-      }
-    }
+    if (isDelete) await TaskDB.remove(id);
+    else await TaskDB.stopRepeat(id);
     await refresh();
   } catch (err) {
     showError(err);
+    refresh().catch(showError);
   }
 });
 

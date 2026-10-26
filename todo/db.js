@@ -46,6 +46,16 @@ const TaskDB = (() => {
     put: (task) => run("readwrite", (s) => s.put(task)),
     remove: (id) => run("readwrite", (s) => s.delete(id)),
     setDone,
+    // Turn recurrence off in one transaction, so it can't race a concurrent setDone.
+    stopRepeat: (id) =>
+      run("readwrite", (s) => {
+        const req = s.get(id);
+        req.onsuccess = () => {
+          const task = req.result;
+          if (task) s.put({ ...task, repeat: null });
+        };
+        return req;
+      }),
   };
 
   // Mark a task done/not done in ONE readwrite transaction, so the read-modify-write can't
@@ -76,10 +86,17 @@ const TaskDB = (() => {
         } else if (!done && task.spawnedId != null) {
           store.get(task.spawnedId).onsuccess = (ev) => {
             const next = ev.target.result;
-            if (next && !next.done) {
-              store.delete(task.spawnedId);
+            if (!next) {
+              delete task.spawnedId; // the next one was deleted: re-ticking may spawn again
+            } else if (!next.done && next.repeat === task.repeat) {
+              store.delete(task.spawnedId); // untouched next occurrence: undo it
               delete task.spawnedId;
-            } // if the next one was already completed, keep the link so we never re-spawn
+            } else {
+              // The series has moved on (next was completed, or the user stopped it there).
+              // Reopen this one as a plain task so there's never a second live copy and a
+              // stopped series isn't revived.
+              task.repeat = null;
+            }
             store.put(task);
           };
         } else {
