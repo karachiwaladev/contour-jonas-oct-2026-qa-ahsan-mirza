@@ -18,6 +18,15 @@
           <span>Due</span>
           <input id="task-due" name="due" type="date">
         </label>
+        <label class="field">
+          <span>Repeat</span>
+          <select id="task-repeat" name="repeat">
+            <option value="">None</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </label>
         <label class="field grow">
           <span>Tags</span>
           <input id="task-tags" name="tags" type="text" placeholder="work, urgent" maxlength="200">

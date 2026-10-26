@@ -1,7 +1,10 @@
 // Client-side database for tasks, backed by IndexedDB.
 // Each task: { id: number (auto), title: string, done: boolean, createdAt: number,
-//              dueDate: "YYYY-MM-DD" | null, tags: string[] }
-// Tasks saved before due dates and tags existed simply lack those two fields.
+//              dueDate: "YYYY-MM-DD" | null, tags: string[],
+//              repeat: "daily" | "weekly" | "monthly" | null,
+//              anchorDay?: number,      // monthly: day-of-month the series started on
+//              spawnedNext?: boolean }  // recurring: next occurrence already created
+// Tasks saved before a field existed simply lack it; the UI treats missing as empty.
 const TaskDB = (() => {
   const DB_NAME = "todo-app";
   const STORE = "tasks";
@@ -35,8 +38,10 @@ const TaskDB = (() => {
 
   return {
     all: () => run("readonly", (s) => s.getAll()),
-    add: ({ title, dueDate = null, tags = [] }) =>
-      run("readwrite", (s) => s.add({ title, done: false, createdAt: Date.now(), dueDate, tags })),
+    add: ({ title, dueDate = null, tags = [], repeat = null, anchorDay }) =>
+      run("readwrite", (s) =>
+        s.add({ title, done: false, createdAt: Date.now(), dueDate, tags, repeat, ...(anchorDay ? { anchorDay } : {}) })
+      ),
     get: (id) => run("readonly", (s) => s.get(id)),
     put: (task) => run("readwrite", (s) => s.put(task)),
     remove: (id) => run("readwrite", (s) => s.delete(id)),

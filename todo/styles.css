@@ -44,7 +44,7 @@ h1 { margin: 0 0 16px; font-size: 1.75rem; }
 .field { display: flex; flex-direction: column; gap: 2px; font-size: 0.85rem; color: var(--muted); }
 .field.grow { flex: 1; min-width: 160px; }
 
-.new-task input, .filters select {
+.new-task input, .new-task select, .filters select {
   flex: 1;
   padding: 10px 12px;
   border: 1px solid var(--border);
@@ -113,6 +113,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
 .task.overdue { border-color: var(--danger); }
 .task.overdue .due { color: var(--danger); font-weight: 600; }
+
+.repeat { color: var(--muted); font-weight: 600; }
+
+.task .stop-repeat {
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.task-actions { display: flex; gap: 6px; }
 
 .tag {
   padding: 1px 8px;
