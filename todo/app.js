@@ -123,12 +123,15 @@ form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const title = titleInput.value.trim();
   if (!title) return;
+  const task = { title, dueDate: dueInput.value || null, tags: parseTags(tagsInput.value) };
+  // Clear the form before the async save so input typed meanwhile isn't wiped afterwards.
+  form.reset();
   try {
-    await TaskDB.add({ title, dueDate: dueInput.value || null, tags: parseTags(tagsInput.value) });
-    form.reset();
+    await TaskDB.add(task);
     status.textContent = "";
     await refresh();
   } catch (err) {
+    titleInput.value = task.title; // give the user their text back
     showError(err);
   }
   titleInput.focus();
