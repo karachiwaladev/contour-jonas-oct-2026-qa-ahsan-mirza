@@ -8,6 +8,21 @@
             "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-destructive.py\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/secret-scan.py\"",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-config.py\"",
+            "timeout": 10
           }
         ]
       }
@@ -28,5 +43,8 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "claude-security@claude-plugins-official": true
   }
 }
