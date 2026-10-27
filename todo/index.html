@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'">
   <title>Todo</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -17,6 +18,14 @@
         <label class="field">
           <span>Due</span>
           <input id="task-due" name="due" type="date" min="1900-01-01" max="9999-12-31">
+        </label>
+        <label class="field">
+          <span>Priority</span>
+          <select id="task-priority" name="priority">
+            <option value="high">High</option>
+            <option value="medium" selected>Medium</option>
+            <option value="low">Low</option>
+          </select>
         </label>
         <label class="field">
           <span>Repeat</span>
@@ -41,12 +50,23 @@
         <button type="button" data-status="active" aria-pressed="false">Active</button>
         <button type="button" data-status="completed" aria-pressed="false">Completed</button>
       </div>
-      <label class="field">
-        <span class="visually-hidden">Filter by tag</span>
-        <select id="tag-filter">
-          <option value="">All tags</option>
-        </select>
-      </label>
+      <div class="filter-selects">
+        <label class="field">
+          <span class="visually-hidden">Filter by priority</span>
+          <select id="priority-filter">
+            <option value="">All priorities</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="visually-hidden">Filter by tag</span>
+          <select id="tag-filter">
+            <option value="">All tags</option>
+          </select>
+        </label>
+      </div>
     </div>
 
     <p id="status" class="status" role="status" aria-live="polite"></p>
