@@ -1,2 +1,6 @@
-.claude/logs/
+.claude/logs/*
+# The prompt log is committed (one JSON object per line); other logs stay local.
+!.claude/logs/prompts.jsonl
 .claude/scheduled_tasks.lock
+__pycache__/
+*.pyc

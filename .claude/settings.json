@@ -1,12 +1,71 @@
 {
+  "permissions": {
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(rm -r -f *)",
+      "Bash(sudo rm -rf *)",
+      "PowerShell(Remove-Item * -Recurse *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push --force-with-lease *)",
+      "Bash(git push * --force)",
+      "Bash(git push * --force *)",
+      "Bash(git push * -f)",
+      "Bash(git push * -f *)",
+      "Bash(git push * --force-with-lease*)",
+      "Bash(curl * | sh)",
+      "Bash(curl * | sh *)",
+      "Bash(curl * | bash)",
+      "Bash(curl * | bash *)",
+      "Bash(curl * | sudo *)",
+      "Bash(wget * | sh)",
+      "Bash(wget * | sh *)",
+      "Bash(wget * | bash)",
+      "Bash(wget * | bash *)",
+      "PowerShell(iwr * | iex*)",
+      "PowerShell(irm * | iex*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.*.local)",
+      "Read(**/.env.development)",
+      "Read(**/.env.production)",
+      "Read(**/.env.test)",
+      "Bash(cat *.env*)",
+      "Bash(cat .env*)",
+      "PowerShell(Get-Content *.env*)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Read|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-destructive.py\"",
+            "timeout": 10
+          }
+        ]
+      },
       {
         "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/block-destructive.py\"",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/secret-scan.py\"",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit|Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/protect-config.py\"",
             "timeout": 10
           }
         ]
@@ -17,16 +76,14 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/log-prompts.py\" 2>/dev/null || true",
-            "timeout": 30
-          },
-          {
-            "type": "command",
             "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/auto-commit-push.py\" 2>/dev/null || true",
             "timeout": 120
           }
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "claude-security@claude-plugins-official": true
   }
 }
