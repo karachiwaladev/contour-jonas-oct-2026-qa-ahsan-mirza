@@ -1,6 +1,6 @@
 // UI for the todo app: create tasks (with optional due date, tags, priority and repeat),
-// edit them inline, mark them done, delete them, and filter by status, priority and tag.
-// Data lives in TaskDB.
+// edit them inline, mark them done, delete them, search them by title/tag, and filter by
+// status, priority, due date and tag. Data lives in TaskDB.
 const form = document.getElementById("new-task");
 const titleInput = document.getElementById("task-title");
 const dueInput = document.getElementById("task-due");
@@ -10,11 +10,22 @@ const priorityInput = document.getElementById("task-priority");
 const statusButtons = document.querySelectorAll(".status-filter button");
 const tagFilter = document.getElementById("tag-filter");
 const priorityFilter = document.getElementById("priority-filter");
+const dueFilter = document.getElementById("due-filter");
+const searchInput = document.getElementById("task-search");
 const list = document.getElementById("task-list");
 const empty = document.getElementById("empty");
 const status = document.getElementById("status");
 
-const filters = { status: "all", tag: "", priority: "" };
+// Seeded from the controls, not hard-coded: on a soft reload or back/forward navigation some
+// browsers (e.g. Firefox) restore a select's or input's previous value, and the filters must
+// match what the user sees.
+const filters = {
+  status: "all",
+  tag: "",
+  priority: priorityFilter.value,
+  due: dueFilter.value,
+  terms: searchTerms(searchInput.value),
+};
 let editingId = null; // id of the task currently shown as an inline edit form
 let editDirty = false; // whether that form has unsaved changes
 
@@ -105,12 +116,41 @@ function compareTasks(a, b) {
   return a.createdAt - b.createdAt;
 }
 
-function matchesFilters(task) {
+// "rent  #Home" -> ["rent", "home"]: lowercased words, a leading # dropped so tags match either way.
+function searchTerms(text) {
+  return text.toLowerCase().split(/\s+/).map((w) => w.replace(/^#+/, "")).filter(Boolean);
+}
+
+// Every search word must appear (as a substring) in the title or in one of the tags.
+// Tags are stored lowercased by parseTags, so only the title needs lowercasing here.
+function matchesSearch(task, terms) {
+  if (!terms.length) return true;
+  const title = task.title.toLowerCase();
+  const tags = task.tags || [];
+  return terms.every((w) => title.includes(w) || tags.some((t) => t.includes(w)));
+}
+
+// Due-date filter. Dates are ranges and apply to open and completed tasks alike; "overdue" is
+// the exception by design: it uses the red Overdue badge's rule (open and past due), since a
+// completed task can't be overdue. `day` holds today and the 7-day window end, computed once
+// per refresh rather than once per task.
+function matchesDue(task, due, day) {
+  if (!due) return true;
+  if (due === "none") return !task.dueDate;
+  if (!task.dueDate) return false;
+  if (due === "overdue") return !task.done && task.dueDate < day.today;
+  if (due === "today") return task.dueDate === day.today;
+  if (due === "week") return task.dueDate >= day.today && task.dueDate <= day.weekEnd;
+  return true;
+}
+
+function matchesFilters(task, day) {
   if (filters.status === "active" && task.done) return false;
   if (filters.status === "completed" && !task.done) return false;
   if (filters.tag && !(task.tags || []).includes(filters.tag)) return false;
   if (filters.priority && priorityOf(task) !== filters.priority) return false;
-  return true;
+  if (!matchesDue(task, filters.due, day)) return false;
+  return matchesSearch(task, filters.terms);
 }
 
 // Small helpers for building the edit form without innerHTML.
@@ -266,12 +306,18 @@ function restoreDraft(draft) {
 }
 const DRAFT_FIELDS = ["title", "due", "priority", "repeat", "tags"];
 
+let refreshSeq = 0; // only the newest refresh() renders, so overlapping calls can't paint stale results
+
 async function refresh() {
+  const seq = ++refreshSeq;
   const tasks = await TaskDB.all();
+  if (seq !== refreshSeq) return; // a newer refresh started while this one was reading
   renderTagOptions(tasks);
   if (editingId !== null && !tasks.some((t) => t.id === editingId)) editingId = null; // deleted elsewhere
+  const t = today();
+  const day = { today: t, weekEnd: stepDate(t, "daily", null, 6) }; // computed once per refresh
   // The task being edited stays visible even if a filter would hide it, so the edit isn't lost.
-  const visible = tasks.filter((t) => t.id === editingId || matchesFilters(t)).sort(compareTasks);
+  const visible = tasks.filter((x) => x.id === editingId || matchesFilters(x, day)).sort(compareTasks);
   const draft = editDraft();
   list.replaceChildren(...visible.map(renderTask));
   restoreDraft(draft);
@@ -329,6 +375,32 @@ tagFilter.addEventListener("change", () => {
 priorityFilter.addEventListener("change", () => {
   filters.priority = priorityFilter.value;
   refresh().catch(showError);
+});
+
+dueFilter.addEventListener("change", () => {
+  filters.due = dueFilter.value;
+  refresh().catch(showError);
+});
+
+// Search: apply the box's current text. Typing is debounced slightly so a burst of keystrokes
+// becomes one refresh; clearing (×, Esc, emptying the box) applies straight away.
+let searchTimer = null;
+function applySearch() {
+  clearTimeout(searchTimer);
+  filters.terms = searchTerms(searchInput.value);
+  refresh().catch(showError);
+}
+searchInput.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  if (!searchInput.value) return applySearch();
+  searchTimer = setTimeout(applySearch, 120);
+});
+// Esc clears in every browser (Chrome does this natively for type=search; Firefox doesn't).
+searchInput.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !searchInput.value) return;
+  e.preventDefault();
+  searchInput.value = "";
+  applySearch();
 });
 
 function startEdit(id) {

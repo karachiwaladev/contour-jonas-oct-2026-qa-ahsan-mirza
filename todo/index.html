@@ -44,6 +44,11 @@
       </div>
     </form>
 
+    <div class="search" role="search">
+      <label for="task-search" class="visually-hidden">Search tasks</label>
+      <input id="task-search" type="search" placeholder="Search tasks by title or tag…" maxlength="100" autocomplete="off" spellcheck="false">
+    </div>
+
     <div class="filters" aria-label="Filters">
       <div class="status-filter" role="group" aria-label="Show">
         <button type="button" data-status="all" aria-pressed="true">All</button>
@@ -53,7 +58,7 @@
       <div class="filter-selects">
         <label class="field">
           <span class="visually-hidden">Filter by priority</span>
-          <select id="priority-filter">
+          <select id="priority-filter" autocomplete="off">
             <option value="">All priorities</option>
             <option value="high">High</option>
             <option value="medium">Medium</option>
@@ -61,8 +66,18 @@
           </select>
         </label>
         <label class="field">
+          <span class="visually-hidden">Filter by due date</span>
+          <select id="due-filter" autocomplete="off">
+            <option value="">All dates</option>
+            <option value="overdue">Overdue</option>
+            <option value="today">Due today</option>
+            <option value="week">Next 7 days</option>
+            <option value="none">No date</option>
+          </select>
+        </label>
+        <label class="field">
           <span class="visually-hidden">Filter by tag</span>
-          <select id="tag-filter">
+          <select id="tag-filter" autocomplete="off">
             <option value="">All tags</option>
           </select>
         </label>
