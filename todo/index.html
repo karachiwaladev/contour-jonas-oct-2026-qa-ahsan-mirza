@@ -16,7 +16,16 @@
       <div class="new-task-extras">
         <label class="field">
           <span>Due</span>
-          <input id="task-due" name="due" type="date">
+          <input id="task-due" name="due" type="date" min="1900-01-01" max="9999-12-31">
+        </label>
+        <label class="field">
+          <span>Repeat</span>
+          <select id="task-repeat" name="repeat">
+            <option value="">None</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
         </label>
         <label class="field grow">
           <span>Tags</span>
