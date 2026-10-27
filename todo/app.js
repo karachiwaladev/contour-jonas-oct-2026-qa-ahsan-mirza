@@ -98,8 +98,11 @@ function formatDue(iso) {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function isOverdue(task) {
-  return !task.done && !!task.dueDate && task.dueDate < today();
+// The single overdue rule, shared by the red badge and the Overdue filter. While a refresh is
+// rendering, both use that refresh's `today` (renderDay), so they can never disagree.
+let renderDay = null;
+function isOverdue(task, now = renderDay?.today ?? today()) {
+  return !task.done && !!task.dueDate && task.dueDate < now;
 }
 
 // Open tasks first, ordered by priority (High → Low); then by due date (no date last);
@@ -116,18 +119,23 @@ function compareTasks(a, b) {
   return a.createdAt - b.createdAt;
 }
 
-// "rent  #Home" -> ["rent", "home"]: lowercased words, a leading # dropped so tags match either way.
+// "rent  #Home" -> [{ text: "rent", tag: false }, { text: "home", tag: true }]: lowercased words;
+// a leading # marks a tag-only term.
 function searchTerms(text) {
-  return text.toLowerCase().split(/\s+/).map((w) => w.replace(/^#+/, "")).filter(Boolean);
+  return text.toLowerCase().split(/\s+/).filter(Boolean)
+    .map((w) => ({ text: w.replace(/^#+/, ""), tag: w.startsWith("#") }))
+    .filter((t) => t.text);
 }
 
-// Every search word must appear (as a substring) in the title or in one of the tags.
-// Tags are stored lowercased by parseTags, so only the title needs lowercasing here.
+// Every search term must match. A plain word matches anywhere in the title or in a tag
+// ("rep" finds "report" and #reports). A #word matches that tag exactly, so "#home" finds
+// tasks tagged home, not "Call home" or #homework. Tags are stored lowercased by parseTags.
 function matchesSearch(task, terms) {
   if (!terms.length) return true;
   const title = task.title.toLowerCase();
   const tags = task.tags || [];
-  return terms.every((w) => title.includes(w) || tags.some((t) => t.includes(w)));
+  return terms.every(({ text, tag }) =>
+    tag ? tags.includes(text) : title.includes(text) || tags.some((t) => t.includes(text)));
 }
 
 // Due-date filter. Dates are ranges and apply to open and completed tasks alike; "overdue" is
@@ -138,7 +146,7 @@ function matchesDue(task, due, day) {
   if (!due) return true;
   if (due === "none") return !task.dueDate;
   if (!task.dueDate) return false;
-  if (due === "overdue") return !task.done && task.dueDate < day.today;
+  if (due === "overdue") return isOverdue(task, day.today);
   if (due === "today") return task.dueDate === day.today;
   if (due === "week") return task.dueDate >= day.today && task.dueDate <= day.weekEnd;
   return true;
@@ -306,24 +314,58 @@ function restoreDraft(draft) {
 }
 const DRAFT_FIELDS = ["title", "due", "priority", "repeat", "tags"];
 
-let refreshSeq = 0; // only the newest refresh() renders, so overlapping calls can't paint stale results
+// Only the newest refresh renders, so overlapping calls can't paint stale results. An
+// overtaken call doesn't resolve early: it waits for the newest one, so callers that do DOM
+// work afterwards (focusing the edit form or the Edit button) always see the final list.
+let refreshSeq = 0;
+let latestRefresh = Promise.resolve();
 
-async function refresh() {
+function refresh() {
   const seq = ++refreshSeq;
+  latestRefresh = render(seq);
+  return latestRefresh;
+}
+
+async function render(seq) {
   const tasks = await TaskDB.all();
-  if (seq !== refreshSeq) return; // a newer refresh started while this one was reading
+  if (seq !== refreshSeq) return latestRefresh; // overtaken: settle when the newest render does
   renderTagOptions(tasks);
   if (editingId !== null && !tasks.some((t) => t.id === editingId)) editingId = null; // deleted elsewhere
   const t = today();
   const day = { today: t, weekEnd: stepDate(t, "daily", null, 6) }; // computed once per refresh
-  // The task being edited stays visible even if a filter would hide it, so the edit isn't lost.
-  const visible = tasks.filter((x) => x.id === editingId || matchesFilters(x, day)).sort(compareTasks);
-  const draft = editDraft();
-  list.replaceChildren(...visible.map(renderTask));
-  restoreDraft(draft);
-  empty.hidden = visible.length > 0;
-  empty.textContent = tasks.length ? "No tasks match these filters." : "No tasks yet. Add one above.";
+  renderDay = day; // badge and filter share this refresh's "today"
+  lastRenderedDate = t;
+  try {
+    // The task being edited stays visible even if a filter would hide it, so the edit isn't lost.
+    const visible = tasks.filter((x) => x.id === editingId || matchesFilters(x, day)).sort(compareTasks);
+    const draft = editDraft();
+    list.replaceChildren(...visible.map(renderTask));
+    restoreDraft(draft);
+    empty.hidden = visible.length > 0;
+    empty.textContent = tasks.length ? "No tasks match these filters." : "No tasks yet. Add one above.";
+  } finally {
+    renderDay = null;
+  }
 }
+
+// Date-based filters and badges depend on "today": re-render just after midnight, and when the
+// tab becomes visible again, so a tab left open overnight doesn't show yesterday's view.
+function scheduleMidnightRefresh() {
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 5);
+  setTimeout(() => {
+    refresh().catch(showError);
+    scheduleMidnightRefresh();
+  }, next - now);
+}
+let lastRenderedDate = today();
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && today() !== lastRenderedDate) {
+    lastRenderedDate = today();
+    refresh().catch(showError);
+  }
+});
+scheduleMidnightRefresh();
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -390,11 +432,13 @@ function applySearch() {
   filters.terms = searchTerms(searchInput.value);
   refresh().catch(showError);
 }
-searchInput.addEventListener("input", () => {
+searchInput.addEventListener("input", (e) => {
   clearTimeout(searchTimer);
+  if (e.isComposing) return; // IME composition in progress: wait for the composed text
   if (!searchInput.value) return applySearch();
   searchTimer = setTimeout(applySearch, 120);
 });
+searchInput.addEventListener("compositionend", applySearch);
 // Esc clears in every browser (Chrome does this natively for type=search; Firefox doesn't).
 searchInput.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || !searchInput.value) return;
