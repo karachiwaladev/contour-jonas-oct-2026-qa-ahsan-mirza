@@ -126,6 +126,47 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 
 .task-actions { display: flex; gap: 6px; }
 
+.task .edit {
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.filter-selects { display: flex; gap: 8px; }
+
+/* Priority badges: colour plus text, so meaning never relies on colour alone. */
+.priority {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  border: 1px solid currentColor;
+}
+.priority-high { color: var(--danger); }
+.priority-medium { color: #b7791f; }
+.priority-low { color: var(--muted); }
+@media (prefers-color-scheme: dark) {
+  .priority-medium { color: #f6c35b; }
+}
+
+/* Inline edit form */
+.task.editing { display: block; }
+.task-edit { display: flex; flex-direction: column; gap: 8px; }
+.task-edit-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.task-edit input, .task-edit select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+}
+.task-edit input[name="title"] { width: 100%; }
+.task-edit input[name="tags"] { flex: 1; min-width: 140px; }
+.task-edit-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.task-edit .cancel-edit { background: transparent; color: var(--text); border: 1px solid var(--border); }
+
 .tag {
   padding: 1px 8px;
   border-radius: 999px;

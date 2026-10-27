@@ -1,17 +1,26 @@
-// UI for the todo app: create tasks (with optional due date and tags), mark them
-// done, delete them, and filter by status and tag. Data lives in TaskDB.
+// UI for the todo app: create tasks (with optional due date, tags, priority and repeat),
+// edit them inline, mark them done, delete them, and filter by status, priority and tag.
+// Data lives in TaskDB.
 const form = document.getElementById("new-task");
 const titleInput = document.getElementById("task-title");
 const dueInput = document.getElementById("task-due");
 const tagsInput = document.getElementById("task-tags");
 const repeatInput = document.getElementById("task-repeat");
+const priorityInput = document.getElementById("task-priority");
 const statusButtons = document.querySelectorAll(".status-filter button");
 const tagFilter = document.getElementById("tag-filter");
+const priorityFilter = document.getElementById("priority-filter");
 const list = document.getElementById("task-list");
 const empty = document.getElementById("empty");
 const status = document.getElementById("status");
 
-const filters = { status: "all", tag: "" };
+const filters = { status: "all", tag: "", priority: "" };
+let editingId = null; // id of the task currently shown as an inline edit form
+
+const PRIORITY_RANK = { high: 3, medium: 2, low: 1 };
+const PRIORITY_LABELS = { high: "High", medium: "Medium", low: "Low" };
+// Tasks saved before priorities existed have none; treat them as Medium everywhere.
+const priorityOf = (task) => (PRIORITY_RANK[task.priority] ? task.priority : "medium");
 
 function showError(err) {
   status.textContent = "Something went wrong: " + (err && err.message ? err.message : err);
@@ -81,9 +90,11 @@ function isOverdue(task) {
   return !task.done && !!task.dueDate && task.dueDate < today();
 }
 
-// Open tasks first; then by due date (no date last); then oldest first.
+// Open tasks first; then by priority (High → Low); then by due date (no date last); then oldest first.
 function compareTasks(a, b) {
   if (a.done !== b.done) return a.done - b.done;
+  const pa = PRIORITY_RANK[priorityOf(a)], pb = PRIORITY_RANK[priorityOf(b)];
+  if (pa !== pb) return pb - pa;
   const ad = a.dueDate || "9999-12-31";
   const bd = b.dueDate || "9999-12-31";
   if (ad !== bd) return ad < bd ? -1 : 1;
@@ -94,10 +105,53 @@ function matchesFilters(task) {
   if (filters.status === "active" && task.done) return false;
   if (filters.status === "completed" && !task.done) return false;
   if (filters.tag && !(task.tags || []).includes(filters.tag)) return false;
+  if (filters.priority && priorityOf(task) !== filters.priority) return false;
   return true;
 }
 
+// Small helpers for building the edit form without innerHTML.
+function el(tag, props = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "text") node.textContent = v;
+    else if (k in node) node[k] = v;
+    else node.setAttribute(k, v);
+  }
+  node.append(...children);
+  return node;
+}
+
+function selectOf(name, options, value, label) {
+  const select = el("select", { name, "aria-label": label });
+  for (const [v, text] of options) select.append(new Option(text, v));
+  select.value = value;
+  return select;
+}
+
+// The inline edit form that replaces a task row while it's being edited.
+function renderEditForm(task) {
+  const li = el("li", { className: "task editing" });
+  li.dataset.id = task.id;
+  const form = el("form", { className: "task-edit", noValidate: true });
+  const title = el("input", { name: "title", type: "text", value: task.title, maxLength: 200, "aria-label": "Title" });
+  const due = el("input", { name: "due", type: "date", value: task.dueDate || "", min: "1900-01-01", max: "9999-12-31", "aria-label": "Due date" });
+  const priority = selectOf("priority", Object.entries(PRIORITY_LABELS), priorityOf(task), "Priority");
+  const repeat = selectOf("repeat", [["", "No repeat"], ...Object.entries(REPEAT_LABELS)], task.repeat || "", "Repeat");
+  const tags = el("input", { name: "tags", type: "text", value: (task.tags || []).join(", "), maxLength: 200, placeholder: "tags", "aria-label": "Tags" });
+  form.append(
+    title,
+    el("div", { className: "task-edit-row" }, [due, priority, repeat, tags]),
+    el("div", { className: "task-edit-actions" }, [
+      el("button", { type: "submit", className: "save", text: "Save" }),
+      el("button", { type: "button", className: "cancel-edit", text: "Cancel" }),
+    ])
+  );
+  li.append(form);
+  return li;
+}
+
 function renderTask(task) {
+  if (task.id === editingId) return renderEditForm(task);
   const li = document.createElement("li");
   li.className = "task" + (task.done ? " done" : "") + (isOverdue(task) ? " overdue" : "");
   li.dataset.id = task.id;
@@ -120,9 +174,14 @@ function renderTask(task) {
   // The ↻ badge marks a live series, so only open tasks show it; completed occurrences
   // are history and shouldn't suggest they still recur.
   const showRepeat = task.repeat && !task.done;
-  if (task.dueDate || tags.length || showRepeat) {
+  const prio = priorityOf(task);
+  {
     const meta = document.createElement("div");
     meta.className = "task-meta";
+    const badge = document.createElement("span");
+    badge.className = "priority priority-" + prio;
+    badge.textContent = PRIORITY_LABELS[prio];
+    meta.append(badge);
     if (task.dueDate) {
       const due = document.createElement("span");
       due.className = "due";
@@ -150,8 +209,15 @@ function renderTask(task) {
   del.textContent = "Delete";
   del.setAttribute("aria-label", "Delete: " + task.title);
 
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "edit";
+  edit.textContent = "Edit";
+  edit.setAttribute("aria-label", "Edit: " + task.title);
+
   const actions = document.createElement("div");
   actions.className = "task-actions";
+  actions.append(edit);
   if (showRepeat) {
     const stop = document.createElement("button");
     stop.type = "button";
@@ -192,8 +258,8 @@ form.addEventListener("submit", async (e) => {
   // A recurring task needs a date to recur from; default the first occurrence to today.
   // (The date input's min/max make the browser block out-of-range dates before submit.)
   const dueDate = dueInput.value || (repeat ? today() : null);
-  const typed = { title: titleInput.value, due: dueInput.value, tags: tagsInput.value, repeat: repeatInput.value };
-  const task = { title, dueDate, tags: parseTags(tagsInput.value), repeat };
+  const typed = { title: titleInput.value, due: dueInput.value, tags: tagsInput.value, repeat: repeatInput.value, priority: priorityInput.value };
+  const task = { title, dueDate, tags: parseTags(tagsInput.value), repeat, priority: priorityInput.value || "medium" };
   if (repeat === "monthly") task.anchorDay = Number(dueDate.slice(8, 10));
   // Clear the form before the async save so input typed meanwhile isn't wiped afterwards.
   form.reset();
@@ -208,6 +274,7 @@ form.addEventListener("submit", async (e) => {
     if (!dueInput.value) dueInput.value = typed.due;
     if (!tagsInput.value) tagsInput.value = typed.tags;
     if (!repeatInput.value) repeatInput.value = typed.repeat;
+    if (priorityInput.value === "medium") priorityInput.value = typed.priority;
     showError(err);
   }
   titleInput.focus();
@@ -226,6 +293,55 @@ tagFilter.addEventListener("change", () => {
   refresh().catch(showError);
 });
 
+priorityFilter.addEventListener("change", () => {
+  filters.priority = priorityFilter.value;
+  refresh().catch(showError);
+});
+
+function startEdit(id) {
+  editingId = id;
+  status.textContent = "";
+  refresh()
+    .then(() => list.querySelector(`.task[data-id="${id}"] input[name="title"]`)?.focus())
+    .catch(showError);
+}
+
+function cancelEdit() {
+  editingId = null;
+  status.textContent = "";
+  refresh().catch(showError);
+}
+
+// Save an inline edit. Validation keeps the form open with a message instead of saving bad data.
+list.addEventListener("submit", async (e) => {
+  if (!e.target.classList.contains("task-edit")) return;
+  e.preventDefault();
+  const f = e.target.elements;
+  const id = Number(e.target.closest(".task").dataset.id);
+  const title = f.title.value.trim();
+  if (!title) {
+    status.textContent = "A task needs a title.";
+    f.title.focus();
+    return;
+  }
+  const repeat = f.repeat.value || null;
+  const dueDate = f.due.value || (repeat ? today() : null); // a series needs a date to recur from
+  const patch = { title, dueDate, tags: parseTags(f.tags.value), priority: f.priority.value, repeat };
+  if (repeat === "monthly") patch.anchorDay = Number(dueDate.slice(8, 10));
+  try {
+    await TaskDB.update(id, patch);
+    editingId = null;
+    status.textContent = "";
+    await refresh();
+  } catch (err) {
+    showError(err); // keep the form open so nothing typed is lost
+  }
+});
+
+list.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && e.target.closest(".task-edit")) cancelEdit();
+});
+
 list.addEventListener("change", async (e) => {
   if (e.target.type !== "checkbox") return;
   const id = Number(e.target.closest(".task").dataset.id);
@@ -235,6 +351,7 @@ list.addEventListener("change", async (e) => {
     await TaskDB.setDone(id, e.target.checked, (task) => ({
       title: task.title,
       tags: task.tags || [],
+      priority: priorityOf(task),
       repeat: task.repeat,
       ...(task.anchorDay ? { anchorDay: task.anchorDay } : {}),
       dueDate: nextDueDate(task.dueDate || today(), task.repeat, task.anchorDay),
@@ -247,10 +364,14 @@ list.addEventListener("change", async (e) => {
 });
 
 list.addEventListener("click", async (e) => {
-  const isDelete = e.target.classList.contains("delete");
-  const isStop = e.target.classList.contains("stop-repeat");
+  const cls = e.target.classList;
+  if (cls.contains("edit")) return startEdit(Number(e.target.closest(".task").dataset.id));
+  if (cls.contains("cancel-edit")) return cancelEdit();
+  const isDelete = cls.contains("delete");
+  const isStop = cls.contains("stop-repeat");
   if (!isDelete && !isStop) return;
   const id = Number(e.target.closest(".task").dataset.id);
+  if (id === editingId) editingId = null;
   try {
     if (isDelete) await TaskDB.remove(id);
     else await TaskDB.stopRepeat(id);

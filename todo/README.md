@@ -11,7 +11,9 @@ a client-side database, so they persist across page reloads with no server. Buil
 - **Due date** (optional): pick a date when adding a task. Open tasks past their due date show **Overdue** in red. Tasks sort by due date, with undated tasks last.
 - **Tags** (optional): type comma-separated tags when adding a task (`work, urgent`). They're trimmed, lowercased and shown as chips.
 - **Recurring tasks** (optional): pick **Repeat** (Daily / Weekly / Monthly) when adding a task. If there's no due date, it starts today. Completing one keeps it in Completed and creates the next occurrence with the same title and tags. Monthly tasks keep their day of the month, clamped to short months (Jan 31 → Feb 28 → Mar 31). If you complete one late, the next date jumps forward to today or later. Un-ticking a task you completed by mistake removes the occurrence it created, as long as that one is still open. **Stop repeating** turns recurrence off and keeps the task.
-- **Filters**: **All / Active / Completed** buttons, plus a tag dropdown built from the tags in use. The two combine.
+- **Priority**: pick **High / Medium / Low** when adding a task (default Medium). Each task shows a coloured badge, and open tasks sort High → Low, then by due date. Tasks saved before priorities existed count as Medium.
+- **Edit**: click **Edit** on a task to change its title, due date, tags, priority or repeat inline. **Save** or Enter saves; **Cancel** or Esc discards. A task can't be saved without a title.
+- **Filters**: **All / Active / Completed** buttons, a priority dropdown, and a tag dropdown built from the tags in use. All three combine.
 
 ## Run it
 

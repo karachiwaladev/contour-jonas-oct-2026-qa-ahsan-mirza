@@ -2,6 +2,7 @@
 // Each task: { id: number (auto), title: string, done: boolean, createdAt: number,
 //              dueDate: "YYYY-MM-DD" | null, tags: string[],
 //              repeat: "daily" | "weekly" | "monthly" | null,
+//              priority: "high" | "medium" | "low",   // missing = "medium"
 //              anchorDay?: number,      // monthly: day-of-month the series started on
 //              spawnedId?: number }     // recurring: id of the next occurrence it created
 // Tasks saved before a field existed simply lack it; the UI treats missing as empty.
@@ -38,10 +39,24 @@ const TaskDB = (() => {
 
   return {
     all: () => run("readonly", (s) => s.getAll()),
-    add: ({ title, dueDate = null, tags = [], repeat = null, anchorDay }) =>
+    add: ({ title, dueDate = null, tags = [], repeat = null, priority = "medium", anchorDay }) =>
       run("readwrite", (s) =>
-        s.add({ title, done: false, createdAt: Date.now(), dueDate, tags, repeat, ...(anchorDay ? { anchorDay } : {}) })
+        s.add({ title, done: false, createdAt: Date.now(), dueDate, tags, repeat, priority, ...(anchorDay ? { anchorDay } : {}) })
       ),
+    // Apply an edit (title, dueDate, tags, priority, repeat, anchorDay) in one readwrite
+    // transaction: read, merge and write can't interleave with a concurrent setDone.
+    update: (id, patch) =>
+      run("readwrite", (s) => {
+        const req = s.get(id);
+        req.onsuccess = () => {
+          const task = req.result;
+          if (!task) return;
+          const next = { ...task, ...patch };
+          if (next.repeat !== "monthly") delete next.anchorDay;
+          s.put(next);
+        };
+        return req;
+      }),
     get: (id) => run("readonly", (s) => s.get(id)),
     put: (task) => run("readwrite", (s) => s.put(task)),
     remove: (id) => run("readwrite", (s) => s.delete(id)),
