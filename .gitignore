@@ -1,2 +1,4 @@
 .claude/logs/
 .claude/scheduled_tasks.lock
+__pycache__/
+*.pyc

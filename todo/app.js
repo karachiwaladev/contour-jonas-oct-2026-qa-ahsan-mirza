@@ -90,11 +90,14 @@ function isOverdue(task) {
   return !task.done && !!task.dueDate && task.dueDate < today();
 }
 
-// Open tasks first; then by priority (High → Low); then by due date (no date last); then oldest first.
+// Open tasks first, ordered by priority (High → Low); then by due date (no date last);
+// then oldest first. Completed tasks are history, so priority doesn't reorder them.
 function compareTasks(a, b) {
   if (a.done !== b.done) return a.done - b.done;
-  const pa = PRIORITY_RANK[priorityOf(a)], pb = PRIORITY_RANK[priorityOf(b)];
-  if (pa !== pb) return pb - pa;
+  if (!a.done) {
+    const pa = PRIORITY_RANK[priorityOf(a)], pb = PRIORITY_RANK[priorityOf(b)];
+    if (pa !== pb) return pb - pa;
+  }
   const ad = a.dueDate || "9999-12-31";
   const bd = b.dueDate || "9999-12-31";
   if (ad !== bd) return ad < bd ? -1 : 1;
@@ -128,11 +131,30 @@ function selectOf(name, options, value, label) {
   return select;
 }
 
+// The date inputs only offer 4-digit years, so string comparison is date comparison (see today()).
+// Anything else (a typed 5-digit year, a partial value) is rejected rather than stored.
+const VALID_DATE = /^(19|[2-9]\d)\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+// Due date and series fields shared by the add and edit forms: a series needs a date to recur
+// from (default today), and a monthly series remembers its day of the month (anchorDay). When an
+// existing monthly task is edited without moving its date, it keeps its original anchor, so a
+// Jan 31 series clamped to Feb 28 still continues on Mar 31.
+function seriesFields(dueValue, repeat, existing = null) {
+  const dueDate = dueValue || (repeat ? today() : null);
+  const fields = { dueDate, repeat };
+  if (repeat === "monthly") {
+    const keepAnchor = existing && existing.repeat === "monthly" && existing.anchorDay && existing.dueDate === dueDate;
+    fields.anchorDay = keepAnchor ? existing.anchorDay : Number(dueDate.slice(8, 10));
+  }
+  return fields;
+}
+
 // The inline edit form that replaces a task row while it's being edited.
 function renderEditForm(task) {
   const li = el("li", { className: "task editing" });
   li.dataset.id = task.id;
-  const form = el("form", { className: "task-edit", noValidate: true });
+  // Native validation stays on, so the date input's min/max are enforced on submit.
+  const form = el("form", { className: "task-edit" });
   const title = el("input", { name: "title", type: "text", value: task.title, maxLength: 200, "aria-label": "Title" });
   const due = el("input", { name: "due", type: "date", value: task.dueDate || "", min: "1900-01-01", max: "9999-12-31", "aria-label": "Due date" });
   const priority = selectOf("priority", Object.entries(PRIORITY_LABELS), priorityOf(task), "Priority");
@@ -203,30 +225,12 @@ function renderTask(task) {
     body.append(meta);
   }
 
-  const del = document.createElement("button");
-  del.type = "button";
-  del.className = "delete";
-  del.textContent = "Delete";
-  del.setAttribute("aria-label", "Delete: " + task.title);
-
-  const edit = document.createElement("button");
-  edit.type = "button";
-  edit.className = "edit";
-  edit.textContent = "Edit";
-  edit.setAttribute("aria-label", "Edit: " + task.title);
-
-  const actions = document.createElement("div");
-  actions.className = "task-actions";
-  actions.append(edit);
-  if (showRepeat) {
-    const stop = document.createElement("button");
-    stop.type = "button";
-    stop.className = "stop-repeat";
-    stop.textContent = "Stop repeating";
-    stop.setAttribute("aria-label", "Stop repeating: " + task.title);
-    actions.append(stop);
-  }
-  actions.append(del);
+  const button = (cls, text) => el("button", { type: "button", className: cls, text, "aria-label": `${text}: ${task.title}` });
+  const actions = el("div", { className: "task-actions" }, [
+    button("edit", "Edit"),
+    ...(showRepeat ? [button("stop-repeat", "Stop repeating")] : []),
+    button("delete", "Delete"),
+  ]);
 
   li.append(checkbox, body, actions);
   return li;
@@ -241,11 +245,35 @@ function renderTagOptions(tasks) {
   tagFilter.value = filters.tag;
 }
 
+// What's typed in the open edit form, so a refresh triggered by something else (ticking another
+// task, changing a filter) re-renders the form without throwing the unsaved changes away.
+function editDraft() {
+  const f = list.querySelector(".task.editing form");
+  if (!f) return null;
+  const values = {};
+  for (const name of DRAFT_FIELDS) values[name] = f.elements[name].value;
+  const focus = document.activeElement?.closest(".task-edit") ? document.activeElement.name : null;
+  return { id: Number(f.closest(".task").dataset.id), values, focus };
+}
+
+// Put the draft back only into the same task's form (not one opened for a different task).
+function restoreDraft(draft) {
+  const f = draft && list.querySelector(`.task.editing[data-id="${draft.id}"] form`);
+  if (!f) return;
+  for (const name of DRAFT_FIELDS) f.elements[name].value = draft.values[name];
+  if (draft.focus) f.elements[draft.focus]?.focus();
+}
+const DRAFT_FIELDS = ["title", "due", "priority", "repeat", "tags"];
+
 async function refresh() {
   const tasks = await TaskDB.all();
   renderTagOptions(tasks);
-  const visible = tasks.filter(matchesFilters).sort(compareTasks);
+  if (editingId !== null && !tasks.some((t) => t.id === editingId)) editingId = null; // deleted elsewhere
+  // The task being edited stays visible even if a filter would hide it, so the edit isn't lost.
+  const visible = tasks.filter((t) => t.id === editingId || matchesFilters(t)).sort(compareTasks);
+  const draft = editDraft();
   list.replaceChildren(...visible.map(renderTask));
+  restoreDraft(draft);
   empty.hidden = visible.length > 0;
   empty.textContent = tasks.length ? "No tasks match these filters." : "No tasks yet. Add one above.";
 }
@@ -254,13 +282,17 @@ form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const title = titleInput.value.trim();
   if (!title) return;
-  const repeat = repeatInput.value || null;
-  // A recurring task needs a date to recur from; default the first occurrence to today.
-  // (The date input's min/max make the browser block out-of-range dates before submit.)
-  const dueDate = dueInput.value || (repeat ? today() : null);
+  if (dueInput.value && !VALID_DATE.test(dueInput.value)) {
+    status.textContent = "Pick a due date between 1900 and 9999.";
+    return;
+  }
   const typed = { title: titleInput.value, due: dueInput.value, tags: tagsInput.value, repeat: repeatInput.value, priority: priorityInput.value };
-  const task = { title, dueDate, tags: parseTags(tagsInput.value), repeat, priority: priorityInput.value || "medium" };
-  if (repeat === "monthly") task.anchorDay = Number(dueDate.slice(8, 10));
+  const task = {
+    title,
+    tags: parseTags(tagsInput.value),
+    priority: priorityInput.value || "medium",
+    ...seriesFields(dueInput.value, repeatInput.value || null),
+  };
   // Clear the form before the async save so input typed meanwhile isn't wiped afterwards.
   form.reset();
   try {
@@ -324,11 +356,19 @@ list.addEventListener("submit", async (e) => {
     f.title.focus();
     return;
   }
-  const repeat = f.repeat.value || null;
-  const dueDate = f.due.value || (repeat ? today() : null); // a series needs a date to recur from
-  const patch = { title, dueDate, tags: parseTags(f.tags.value), priority: f.priority.value, repeat };
-  if (repeat === "monthly") patch.anchorDay = Number(dueDate.slice(8, 10));
+  if (f.due.value && !VALID_DATE.test(f.due.value)) {
+    status.textContent = "Pick a due date between 1900 and 9999.";
+    f.due.focus();
+    return;
+  }
   try {
+    const existing = await TaskDB.get(id);
+    const patch = {
+      title,
+      tags: parseTags(f.tags.value),
+      priority: f.priority.value,
+      ...seriesFields(f.due.value, f.repeat.value || null, existing),
+    };
     await TaskDB.update(id, patch);
     editingId = null;
     status.textContent = "";

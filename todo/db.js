@@ -4,6 +4,7 @@
 //              repeat: "daily" | "weekly" | "monthly" | null,
 //              priority: "high" | "medium" | "low",   // missing = "medium"
 //              anchorDay?: number,      // monthly: day-of-month the series started on
+//              edited?: boolean,        // changed via the edit form (undo won't delete it)
 //              spawnedId?: number }     // recurring: id of the next occurrence it created
 // Tasks saved before a field existed simply lack it; the UI treats missing as empty.
 const TaskDB = (() => {
@@ -33,7 +34,8 @@ const TaskDB = (() => {
       const req = fn(tx.objectStore(STORE));
       tx.oncomplete = () => resolve(req && req.result);
       tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
+      // An explicit tx.abort() (e.g. "task no longer exists") has no tx.error; say why instead.
+      tx.onabort = () => reject(tx.error || new Error(tx.abortReason || "The change was not saved."));
     });
   }
 
@@ -45,13 +47,19 @@ const TaskDB = (() => {
       ),
     // Apply an edit (title, dueDate, tags, priority, repeat, anchorDay) in one readwrite
     // transaction: read, merge and write can't interleave with a concurrent setDone.
+    // Rejects if the task no longer exists (e.g. deleted in another tab), so the UI can say so.
+    // Marks the task `edited`, so undoing its predecessor never deletes the user's changes.
     update: (id, patch) =>
       run("readwrite", (s) => {
         const req = s.get(id);
         req.onsuccess = () => {
           const task = req.result;
-          if (!task) return;
-          const next = { ...task, ...patch };
+          if (!task) {
+            req.transaction.abortReason = "This task no longer exists. It may have been deleted in another tab.";
+            req.transaction.abort();
+            return;
+          }
+          const next = { ...task, ...patch, edited: true };
           if (next.repeat !== "monthly") delete next.anchorDay;
           s.put(next);
         };
@@ -103,11 +111,11 @@ const TaskDB = (() => {
             const next = ev.target.result;
             if (!next) {
               delete task.spawnedId; // the next one was deleted: re-ticking may spawn again
-            } else if (!next.done && next.repeat === task.repeat) {
+            } else if (!next.done && !next.edited && next.repeat === task.repeat) {
               store.delete(task.spawnedId); // untouched next occurrence: undo it
               delete task.spawnedId;
             } else {
-              // The series has moved on (next was completed, or the user stopped it there).
+              // The series has moved on (next was completed, edited, or the user stopped it there).
               // Reopen this one as a plain task so there's never a second live copy and a
               // stopped series isn't revived.
               task.repeat = null;
