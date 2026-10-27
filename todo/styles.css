@@ -134,7 +134,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   font-size: 0.8rem;
 }
 
-.filter-selects { display: flex; gap: 8px; }
+.filter-selects { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.search { margin-top: 16px; }
+.search input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+}
 
 /* Priority badges: colour plus text, so meaning never relies on colour alone. */
 .priority {

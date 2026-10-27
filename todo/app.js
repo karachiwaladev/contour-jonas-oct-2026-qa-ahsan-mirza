@@ -10,11 +10,13 @@ const priorityInput = document.getElementById("task-priority");
 const statusButtons = document.querySelectorAll(".status-filter button");
 const tagFilter = document.getElementById("tag-filter");
 const priorityFilter = document.getElementById("priority-filter");
+const dueFilter = document.getElementById("due-filter");
+const searchInput = document.getElementById("task-search");
 const list = document.getElementById("task-list");
 const empty = document.getElementById("empty");
 const status = document.getElementById("status");
 
-const filters = { status: "all", tag: "", priority: "" };
+const filters = { status: "all", tag: "", priority: "", due: "", terms: [] };
 let editingId = null; // id of the task currently shown as an inline edit form
 let editDirty = false; // whether that form has unsaved changes
 
@@ -105,12 +107,39 @@ function compareTasks(a, b) {
   return a.createdAt - b.createdAt;
 }
 
+// "rent  #Home" -> ["rent", "home"]: lowercased words, a leading # dropped so tags match either way.
+function searchTerms(text) {
+  return text.toLowerCase().split(/\s+/).map((w) => w.replace(/^#+/, "")).filter(Boolean);
+}
+
+// Every search word must appear (as a substring) in the title or in one of the tags.
+function matchesSearch(task, terms) {
+  if (!terms.length) return true;
+  const title = task.title.toLowerCase();
+  const tags = (task.tags || []).map((t) => t.toLowerCase());
+  return terms.every((w) => title.includes(w) || tags.some((t) => t.includes(w)));
+}
+
+// Due-date filter. "week" means today through the next 6 days; "overdue" uses the same rule
+// as the red Overdue badge (open and past due).
+function matchesDue(task, due) {
+  if (!due) return true;
+  if (due === "none") return !task.dueDate;
+  if (!task.dueDate) return false;
+  if (due === "overdue") return isOverdue(task);
+  const t = today();
+  if (due === "today") return task.dueDate === t;
+  if (due === "week") return task.dueDate >= t && task.dueDate <= stepDate(t, "daily", null, 6);
+  return true;
+}
+
 function matchesFilters(task) {
   if (filters.status === "active" && task.done) return false;
   if (filters.status === "completed" && !task.done) return false;
   if (filters.tag && !(task.tags || []).includes(filters.tag)) return false;
   if (filters.priority && priorityOf(task) !== filters.priority) return false;
-  return true;
+  if (!matchesDue(task, filters.due)) return false;
+  return matchesSearch(task, filters.terms);
 }
 
 // Small helpers for building the edit form without innerHTML.
@@ -329,6 +358,25 @@ tagFilter.addEventListener("change", () => {
 priorityFilter.addEventListener("change", () => {
   filters.priority = priorityFilter.value;
   refresh().catch(showError);
+});
+
+dueFilter.addEventListener("change", () => {
+  filters.due = dueFilter.value;
+  refresh().catch(showError);
+});
+
+// Search filters on every keystroke; the native × button and Esc both empty the box, and
+// either way an "input" event fires, so clearing shows everything again.
+searchInput.addEventListener("input", () => {
+  filters.terms = searchTerms(searchInput.value);
+  refresh().catch(showError);
+});
+searchInput.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && searchInput.value) {
+    e.preventDefault();
+    searchInput.value = "";
+    searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+  }
 });
 
 function startEdit(id) {
