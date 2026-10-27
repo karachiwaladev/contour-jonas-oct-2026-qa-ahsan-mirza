@@ -49,7 +49,9 @@ const TaskDB = (() => {
     // transaction: read, merge and write can't interleave with a concurrent setDone.
     // Rejects if the task no longer exists (e.g. deleted in another tab), so the UI can say so.
     // Marks the task `edited`, so undoing its predecessor never deletes the user's changes.
-    update: (id, patch) =>
+    // `derive(task)` computes fields that depend on the stored record (e.g. the monthly anchor)
+    // inside the same transaction, so they're never based on a stale read.
+    update: (id, patch, derive = () => ({})) =>
       run("readwrite", (s) => {
         const req = s.get(id);
         req.onsuccess = () => {
@@ -59,8 +61,15 @@ const TaskDB = (() => {
             req.transaction.abort();
             return;
           }
-          const next = { ...task, ...patch, edited: true };
+          const changes = { ...patch, ...derive(task) };
+          const next = { ...task, ...changes };
           if (next.repeat !== "monthly") delete next.anchorDay;
+          // A changed repeat starts a fresh series: forget the old next-occurrence link, so
+          // completing this task spawns again instead of being blocked by a stale spawnedId.
+          if ((next.repeat || null) !== (task.repeat || null)) delete next.spawnedId;
+          // Only a real change marks the task edited (a no-op Save must not block undo).
+          const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+          if (Object.keys(changes).some((k) => !same(changes[k], task[k]))) next.edited = true;
           s.put(next);
         };
         return req;

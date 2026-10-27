@@ -16,6 +16,7 @@ const status = document.getElementById("status");
 
 const filters = { status: "all", tag: "", priority: "" };
 let editingId = null; // id of the task currently shown as an inline edit form
+let editDirty = false; // whether that form has unsaved changes
 
 const PRIORITY_RANK = { high: 3, medium: 2, low: 1 };
 const PRIORITY_LABELS = { high: "High", medium: "Medium", low: "Low" };
@@ -331,7 +332,14 @@ priorityFilter.addEventListener("change", () => {
 });
 
 function startEdit(id) {
+  // Don't silently drop unsaved changes in another task's editor; ask to save or cancel first.
+  if (editingId !== null && editingId !== id && editDirty) {
+    status.textContent = "Save or cancel your current edit first.";
+    list.querySelector(`.task.editing input[name="title"]`)?.focus();
+    return;
+  }
   editingId = id;
+  editDirty = false;
   status.textContent = "";
   refresh()
     .then(() => list.querySelector(`.task[data-id="${id}"] input[name="title"]`)?.focus())
@@ -339,9 +347,16 @@ function startEdit(id) {
 }
 
 function cancelEdit() {
+  const id = editingId;
   editingId = null;
+  editDirty = false;
   status.textContent = "";
-  refresh().catch(showError);
+  refresh().then(() => focusEditButton(id)).catch(showError);
+}
+
+// After Save/Cancel the form is replaced, so put keyboard focus back on that task's Edit button.
+function focusEditButton(id) {
+  list.querySelector(`.task[data-id="${id}"] .edit`)?.focus();
 }
 
 // Save an inline edit. Validation keeps the form open with a message instead of saving bad data.
@@ -361,25 +376,37 @@ list.addEventListener("submit", async (e) => {
     f.due.focus();
     return;
   }
+  const due = f.due.value, repeat = f.repeat.value || null;
   try {
-    const existing = await TaskDB.get(id);
-    const patch = {
-      title,
-      tags: parseTags(f.tags.value),
-      priority: f.priority.value,
-      ...seriesFields(f.due.value, f.repeat.value || null, existing),
-    };
-    await TaskDB.update(id, patch);
-    editingId = null;
-    status.textContent = "";
-    await refresh();
+    // Series fields (due date default, monthly anchor) are derived from the stored task inside
+    // update's own transaction, so they can't be based on a stale read.
+    await TaskDB.update(id, { title, tags: parseTags(f.tags.value), priority: f.priority.value },
+      (stored) => seriesFields(due, repeat, stored));
+    // Only close the editor if it's still this task's (another edit may have opened meanwhile).
+    if (editingId === id) {
+      editingId = null;
+      editDirty = false;
+      status.textContent = "";
+      await refresh();
+      focusEditButton(id);
+    } else {
+      await refresh();
+    }
   } catch (err) {
     showError(err); // keep the form open so nothing typed is lost
   }
 });
 
+// Esc cancels the edit, except when it's closing a native dropdown or date picker inside the form.
 list.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && e.target.closest(".task-edit")) cancelEdit();
+  if (e.key !== "Escape" || !e.target.closest(".task-edit")) return;
+  if (e.target.tagName === "SELECT" || e.target.type === "date") return;
+  cancelEdit();
+});
+
+// Track unsaved changes so opening another task's editor doesn't silently discard them.
+list.addEventListener("input", (e) => {
+  if (e.target.closest(".task-edit")) editDirty = true;
 });
 
 list.addEventListener("change", async (e) => {
