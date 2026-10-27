@@ -14,7 +14,7 @@ a client-side database, so they persist across page reloads with no server. Buil
 - **Priority**: pick **High / Medium / Low** when adding a task (default Medium). Each task shows a coloured badge, and open tasks sort High → Low, then by due date. Tasks saved before priorities existed count as Medium.
 - **Edit**: click **Edit** on a task to change its title, due date, tags, priority or repeat inline. **Save** or Enter saves; **Cancel** or Esc discards. A task can't be saved without a title.
 - **Search**: type in the search box to filter tasks by title or tag as you type. Matching ignores case, and every word must match the title or a tag (`#` optional), so `rent home` narrows further. Clear it with the **×** button, Esc or backspace to see everything again.
-- **Filters**: **All / Active / Completed** buttons, plus priority, due date (Overdue / Due today / Next 7 days / No date) and tag dropdowns. The tag list is built from the tags in use. All filters combine with each other and with search.
+- **Filters**: **All / Active / Completed** buttons, plus priority, due date (Overdue / Due today / Next 7 days / No date) and tag dropdowns. The tag list is built from the tags in use. All filters combine with each other and with search. Due-date ranges (Due today, Next 7 days, No date) include completed tasks. **Overdue** follows the red badge's rule (open and past due), so it never lists completed tasks.
 
 ## Run it
 
